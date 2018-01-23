@@ -1,0 +1,412 @@
+#!/usr/bin/perl
+
+# cointop
+# see data about who's connected to your node (core/abc/unlimited/altcoins too)
+# 2018012201 (c) jeremy kister @ kister.net
+# released under the artistic license v2.
+
+use strict;
+use Socket;
+use Getopt::Long;
+use LWP::UserAgent;
+use JSON::RPC::Client;
+use Term::Cap;
+use Term::ANSIColor;
+
+my $VER = '1.0';
+my %opt = ( host     => '127.0.0.1',
+            sort     => 'bytesrecv',
+            interval => 10,
+            nocls    => 0,
+          );
+
+my $good = GetOptions( \%opt,
+            'debug',
+            'help' => \&help,
+            'host=s',
+            'nocls',
+            'once',
+            'sort=s',
+            'port=i',
+            'interval=i',
+            'testnet',
+            'username=s',
+          );
+# f,R RESERVED
+
+exit 1 unless $good;
+
+if($opt{testnet}){
+    $opt{port} ||= 18332;
+}else{
+    $opt{port} ||= 8332;
+}
+
+if($opt{username}){
+    print "password: ";
+    chop($opt{password} = <STDIN>);
+}else{
+    my $HOME=(getpwuid($>))[7];
+    if(open(my $bconf, "${HOME}/.bitcoin/bitcoin.conf")){
+        while(<$bconf>){
+            if(/^rpcuser=(\S+)/){
+	            $opt{username}=$1;
+	        }elsif(/^rpcpassword=(\S+)/){
+	            $opt{password}=$1;
+	        }
+	    }
+	    close $bconf;
+	}else{
+	    verbose( "can't read ${HOME}/.bitcoin/bitcoin.conf: $!" );
+        verbose( "maybe specify --username" );
+	    exit;
+	}
+}
+
+unless( $opt{username} ){
+    verbose( "no username set/found.  create .bitcoin/bitcoin.conf or use --username" );
+    exit 1;
+}
+
+my %fields = (bitcoin => {map { $_ => 1 } qw/ms dir bytesrecv bytessent subver blocks headers/},
+              len     => {map { $_ => 0 } qw/id addr subver synced_blocks synced_headers/},
+              'whois.arin.net'    => {map { $_ => 1 }
+                                      qw/CIDR OrgName OrgId Address City StateProv PostalCode Country/},
+              'whois.apnic.net'   => {map { $_ => 1 }
+                                      qw/role address phone country route/},
+              'whois.africic.net' => {map { $_ => 1 }
+                                      qw/inetnum netname descr country/},
+              'whois.ripe.net'    => {map { $_ => 1 }
+                                      qw/descr role address route country/},
+              'whois.lacnic.net'  => {map { $_ => 1 }
+                                      qw/inetnum owner responsible address country/},
+             );
+
+my $term   = Term::Cap->Tgetent( { OSPEED => 9600 });
+my $cls    = $term->Tputs('cl');
+my $UA     = "Mozilla/4.0 (compatible; cointop/$VER) Gecko/20100101";
+my $ua     = LWP::UserAgent->new(agent   => $UA,
+                                 timeout => 1,
+                                 keep_alive => 1,
+                                );
+my $URI   = "http://$opt{host}:$opt{port}/";
+my $client = JSON::RPC::Client->new();
+$client->ua->credentials(
+     "$opt{host}:$opt{port}", 'jsonrpc', $opt{username} => $opt{password}
+);
+
+debug( "invoked" );
+
+my @cycle = qw(| / - \\);
+my $cyclepos=0;
+while( 1 ){
+    my (%data,%ids);
+    for my $href ( @{api($client, $URI, {method => 'getpeerinfo'})} ){
+        $href->{subver} =~ s#^/(.*)/$#$1#;
+
+        if( exists($opt{f}{exclude}) ){
+            if( $href->{$opt{f}{exclude}} =~ /$opt{R}{exclude}/ ){   
+                debug( "exclude: $opt{f}{exclude} matches /$opt{r}{exclude}/ ($href->{$opt{f}{exclude}})" );
+                next;
+            }
+        }
+        if( exists($opt{f}{include}) ){
+            unless( $href->{$opt{f}{include}} =~ /$opt{R}{include}/ ){
+                debug( "exclude: $opt{f}{include} does not match /$opt{R}{include}/ ($href->{$opt{f}{include}})" );
+                next;
+            }
+        }
+
+        for my $field (qw/id addr subver synced_blocks synced_headers/){
+            my $len = length($href->{$field});
+            if( $len > $fields{len}{$field} ){
+                $fields{len}{$field} = $len;
+            }
+        }
+
+        (my $mss = substr( $href->{pingtime}, 0, 4 )) =~ s/\.$//;
+
+        $data{$href->{addr}} = { id        => $href->{id},
+                                 ms        => $mss,
+                                 dir       => $href->{inbound} ? 'in' : 'out',
+                                 bytesrecv => $href->{bytesrecv},
+                                 bytessent => $href->{bytessent},
+                                 subver    => $href->{subver},
+                                 blocks    => $href->{synced_blocks},
+                                 headers   => $href->{synced_headers},
+                               };
+        $ids{$href->{id}} = $href->{addr};
+
+    }
+
+    my $idlen = $fields{len}{id};
+    my $addrlen = $fields{len}{addr};
+    my $subverlen = $fields{len}{subver};
+    my $blockslen = $fields{len}{synced_blocks};
+    my $headerslen = $fields{len}{synced_headers};
+    
+    print $cls unless $opt{nocls};
+    printf( "%-${idlen}s | %-${addrlen}s | %-${subverlen}s | %-5s | %-7s | %-7s | %-3s | %-${blockslen}s | %-s\n",
+            'id',   'addr',               'subver',                  'ms',  'recv', 'sent', 'dir', 'blocks', 'headers' );
+
+    my $totallen = ($idlen + $addrlen + $subverlen + 5 + 7 + 7 + 3 + $blockslen + $headerslen + (3*8) );
+    print '-' x $totallen . "\n";
+
+    my @sorted = $opt{sort} eq 'subver' || $opt{sort} eq 'dir' ?
+                                      sort { $data{$a}{$opt{sort}} cmp $data{$b}{$opt{sort}} } keys %data :
+                 $opt{sort} eq 'ms' ? sort { $data{$a}{$opt{sort}} <=> $data{$b}{$opt{sort}} } keys %data :
+                                      sort { $data{$b}{$opt{sort}} <=> $data{$a}{$opt{sort}} ||
+                                             $data{$b}{$opt{sort}} cmp $data{$a}{$opt{sort}} } keys %data;
+
+    for my $addr (@sorted){
+        my $rb = humanify( $data{$addr}{bytesrecv} );
+        my $sb = humanify( $data{$addr}{bytessent} );
+
+        if( $opt{host} && $opt{host} eq $data{$addr}{id} ){
+            printf "\033[47;30m"; # highlight
+        }
+        printf( "%-${idlen}s | %-${addrlen}s | %-${subverlen}s | %-5s | %-7s | %-7s | %-3s | %-${blockslen}s | %-s\n",
+                $data{$addr}{id},
+                $addr,
+                $data{$addr}{subver},
+                $data{$addr}{ms},
+                $rb,
+                $sb,
+                $data{$addr}{dir},
+                $data{$addr}{blocks},
+                $data{$addr}{headers},
+              );
+        if( $opt{host} && $opt{host} eq $data{$addr}{id} ){
+            printf "\033[40;37m"; # unhighlight
+        }
+    }
+
+    exit if $opt{once};
+
+	my $key;
+    print "\n",
+          "[(q)uit|(s)ort|(i)nterval|(f)ilter|(d)ata|(h)ighlight]:\n";
+    for(1..$opt{interval}){
+        print $cycle[$cyclepos] unless $opt{nocls}; # would make no sense
+        eval {
+            local $SIG{ALRM} = sub { die "timeout" };
+		    alarm(1);
+            $key = getkey();
+		    alarm(0);
+	    };
+	    alarm(0);
+    
+        print "\b";
+        last if $key;
+        $cyclepos++;
+        $cyclepos=0 if $cyclepos==4;
+    }
+
+    next unless $key;
+    print "\b\b" unless $opt{nocls}; # get rid of last cyclewait character and possibly $key
+    exit if $key eq 'q';
+    if( $key eq 'h' ){
+        print "id to highlight: ";
+        chomp(my $id = <STDIN>);
+        if( exists($ids{$id}) ){
+            $opt{host} = $id;
+        }else{
+            print "cant find id $id\n";
+            <STDIN>;
+        }
+    }elsif( $key eq 'f' ){
+        print "mode of this filter (or 'clear' to clear all) [include|exclude|clear]: ";
+        chomp(my $mode = <STDIN>);
+        if( $mode eq 'clear' ){
+            delete $opt{f};
+            delete $opt{R};
+            next;
+        }
+        unless( $mode eq 'include' || $mode eq 'exclude' ){
+            print "invalid mode\n";
+            <STDIN>;
+            next;
+        }
+
+        my $str = "enter field to filter on [";
+        for my $field (sort keys %{ $fields{bitcoin} }){
+            $str .= $field . '|';
+        }
+        chop($str); # trailing |
+        $str .= "]: ";
+        print "\n", $str;
+        chomp(my $input = <STDIN>);
+        if( exists($fields{bitcoin}{$input}) ){
+            $opt{f}{$mode} = $input;
+        }else{
+            print "cannot filter by field: $input.\n";
+            if( $opt{f}{$mode} ){
+                delete $opt{f}{$mode};
+                delete $opt{R}{$mode};
+                print "existing $mode filter deleted\n";
+            }
+            print "press <enter> to continue.\n";
+            <STDIN>;
+            next;
+        }
+
+        print "enter regex, i.e.: ^10\.0\.0 or ABC or (?i)aBc  : ";
+        chop(my $regex = <STDIN>);
+        if( $regex ){
+            $opt{R}{$mode} = $regex;
+        }else{
+            print "won't create filter with emtpy regex\n";
+            delete $opt{f}{$mode} unless $opt{R}{mode};
+            <STDIN>;
+            next;
+        }
+
+    }elsif( $key eq 'o' || $key eq 's' ){ # o for top-like
+        my $str = "enter field to sort by [";
+        for my $field (sort keys %{ $fields{bitcoin} }){
+            $str .= $opt{sort} eq $field ? "_${field}_" : $field;
+            $str .= '|';
+        }
+        chop($str); # trailing |
+        $str .= "]: ";
+        print $str;
+        chop(my $input = <STDIN>);
+
+        if( $input eq 'sent' ){
+            $input = 'bytessent';
+        }elsif( $input eq 'recv' ){
+            $input = 'bytesrecv';
+        }
+        if( exists($fields{bitcoin}{$input}) ){
+            $opt{sort} = $input;
+        }else{
+            print "cannot sort by column: $input.\n",
+                  "press <enter> to continue.\n";
+            <STDIN>;
+        }
+    }elsif( $key eq 'i' || $key eq 's' ){ # s for 'top' like compat
+        print "enter refresh delay in seconds [$opt{interval}]: ";
+        chop(my $input = <STDIN>);
+        if( int($input) == $input && $input > 0 ){
+            $opt{interval} = $input;
+        }elsif( $input ){
+            print "invalid input: $input\n";
+            <STDIN>;
+        }
+    }elsif( $key eq 'd' ){
+        print "enter id for more data: ";
+        chop(my $id = <STDIN>);
+        my $ipaddr;
+        unless( exists($ids{$id}) ){
+            print "id $id does not exist\n";
+            <STDIN>;
+            next;
+        }
+        if( $ids{$id} =~ /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/ ){
+            $ipaddr = $1;
+        }
+
+        my $iaddr = inet_aton($ipaddr);
+        my $name = gethostbyaddr( $iaddr, AF_INET ) || 'nxdomain';
+        print "ipaddr: $ipaddr\n",
+              "name: $name\n";
+    
+        my $host;
+        for my $line (split /\n/, `whois -h whois.iana.org $ipaddr`) {
+            if( $line =~ /^whois:\s*(\S+)/ ){
+                $host = $1;
+                last;
+            }
+        }
+        for my $line (split /\n/, `whois -h $host $ipaddr 2>/dev/null`) {
+            if( $line =~ /^(\S+):\s*\S+/ ){
+                print "$line\n" if exists $fields{$host}{$1};
+            }
+        }
+        
+        print "press a key to continue.";
+        getkey();
+    }
+}   
+
+sub getkey {
+
+    my $key;
+    open(TTY, "+</dev/tty") or die "no tty: $!";
+    system "stty  cbreak </dev/tty >/dev/tty 2>&1";
+    #my $key = getc(TTY);
+    # or maybe
+    sysread(TTY, $key, 1);
+    system "stty -cbreak </dev/tty >/dev/tty 2>&1";
+    
+    return $key;
+}
+
+sub humanify {
+	my $bytes = shift;
+
+	my $data;
+	if( $bytes >= 1099511627776 ){
+		$data = sprintf('%.2f', ($bytes/1099511627776)) . 'T';
+	}elsif( $bytes >= 1073741824 ){
+		$data = sprintf('%.2f', ($bytes/1073741824)) . 'G';
+	}elsif( $bytes >= 1048576 ){
+		$data = sprintf('%.2f', ($bytes/1048576)) . 'M';
+	}else{
+		$data = sprintf('%.2f', ($bytes/1024)) . 'K';
+	}
+		
+	return $data;
+}
+
+sub api {
+    my $client = shift || die "api: specify client";
+    my $URI = shift || die "api: no URI";
+    my $obj = shift || die "no obj!\n";
+
+    debug( " api->", $obj->{method} );
+
+    my $res = $client->call( $URI, $obj );
+
+    if ($res){
+        if($res->is_error){
+            verbose( "Error : ", $res->error_message );
+        }else{
+            debug( "RESULT: ", $res->result );
+            return $res->result;
+        }
+    }else{
+        verbose( "ERROR: ", $client->status_line );
+    }
+
+    return $res->result;
+}
+
+sub verbose {
+    my ($msg) = join('', @_);
+    
+    warn "$msg\n";
+}
+
+sub debug {
+    verbose @_ if $opt{debug}
+}
+
+sub help {
+    print <<__EOH__
+
+    debug       set debug info
+    help        do not print help
+    interval    seconds to refresh              [10]
+    nocls       do not ever clear screen
+    once        display data once and exit
+    port        port of node API                [8332]
+    sort        column to sort by               [bytesrecv]
+    testnet     put in 'testnet' mode
+    username    specify username                [(read from ~/.bitcoin/bitcoin.conf)]
+
+__EOH__
+    ;
+
+    exit;
+}

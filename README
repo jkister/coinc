@@ -1,0 +1,8 @@
+# cointop
+See information about nodes that are connected to your *coin node
+
+needs perl.
+
+tested with bitcoin core/abc/unlimited
+
+see included screenshot.png
