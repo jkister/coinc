@@ -24,11 +24,12 @@ my $good = GetOptions( \%opt,
             'debug',
             'help' => \&help,
             'host=s',
+            'interval=i',
+            'lines=i',
             'nocls',
             'once',
-            'sort=s',
             'port=i',
-            'interval=i',
+            'sort=s',
             'testnet',
             'username=s',
           );
@@ -68,7 +69,7 @@ unless( $opt{username} ){
     exit 1;
 }
 
-my %fields = (bitcoin => {map { $_ => 1 } qw/ms dir bytesrecv bytessent subver blocks headers/},
+my %fields = (bitcoin => {map { $_ => 1 } qw/ms dir bytesrecv bytessent subver conntime blocks headers/},
               len     => {map { $_ => 0 } qw/id addr subver synced_blocks synced_headers/},
               'whois.arin.net'    => {map { $_ => 1 }
                                       qw/CIDR OrgName OrgId Address City StateProv PostalCode Country/},
@@ -101,6 +102,10 @@ my @cycle = qw(| / - \\);
 my $cyclepos=0;
 while( 1 ){
     my (%data,%ids);
+
+    my $height = api($client, $URI, {method => 'getinfo'})->{blocks};
+
+
     for my $href ( @{api($client, $URI, {method => 'getpeerinfo'})} ){
         $href->{subver} =~ s#^/(.*)/$#$1#;
 
@@ -117,7 +122,25 @@ while( 1 ){
             }
         }
 
-        for my $field (qw/id addr subver synced_blocks synced_headers/){
+        # abbreviate subver
+        if( $href->{subver} =~ /Bitcoin ABC:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
+            my ($ver,$eb) = ($1,$2);
+            $href->{subver} = "ABC/$ver:$eb";
+        }elsif( $href->{subver} =~ /BUCash:(\d+\.\d+\.\d+(?:\.\d+)*)\(EB(\d+);\s*AD(\d+)/ ){
+            my ($ver,$eb,$ad) = ($1,$2,$3);
+            $href->{subver} = "BUC/$ver:$eb:$ad";
+        }elsif( $href->{subver} =~ /XT:(\d+\.\d+\.\d+[a-zA-Z]*)\(.*EB(\d+)/ ){
+            my ($ver,$eb) = ($1,$2);
+            $href->{subver} = "XT/$ver:$eb";
+        }elsif( $href->{subver} =~ /btcwire:(\d+\.\d+(?:\.\d+)*)\/OpenBazaar:(\d+\.\d+(?:\.\d+)*)/ ){
+            #btcwire:0.5.0/OpenBazaar:0.1.0 
+            my ($bwv,$obv) = ($1,$2);
+            $href->{subver} = "bw/$bwv/ob/$obv";
+        }elsif( $href->{subver} =~ /bitnodes.bitcoinunlimited.info:(\d+\.\d+(?:\.\d+)*)/ ){
+            my $ver = $1;
+            $href->{subver} = "bitnodes.bu:$ver";
+        }
+        for my $field (qw/id addr subver conntime bytesrecv bytessent synced_blocks synced_headers/){
             my $len = length($href->{$field});
             if( $len > $fields{len}{$field} ){
                 $fields{len}{$field} = $len;
@@ -127,6 +150,7 @@ while( 1 ){
         (my $mss = substr( $href->{pingtime}, 0, 4 )) =~ s/\.$//;
 
         $data{$href->{addr}} = { id        => $href->{id},
+                                 conntime  => humanify_time( time() - $href->{conntime} ),
                                  ms        => $mss,
                                  dir       => $href->{inbound} ? 'in' : 'out',
                                  bytesrecv => $href->{bytesrecv},
@@ -142,14 +166,17 @@ while( 1 ){
     my $idlen = $fields{len}{id};
     my $addrlen = $fields{len}{addr};
     my $subverlen = $fields{len}{subver};
+    my $connlen = $fields{len}{conntime};
+    my $recvlen = $fields{len}{bytesrecv};
+    my $sentlen = $fields{len}{bytessent};
     my $blockslen = $fields{len}{synced_blocks};
     my $headerslen = $fields{len}{synced_headers};
     
     print $cls unless $opt{nocls};
-    printf( "%-${idlen}s | %-${addrlen}s | %-${subverlen}s | %-5s | %-7s | %-7s | %-3s | %-${blockslen}s | %-s\n",
-            'id',   'addr',               'subver',                  'ms',  'recv', 'sent', 'dir', 'blocks', 'headers' );
+    printf( "%-${idlen}s | %-${addrlen}s | %-${subverlen}s | %-${connlen}s | %-5s | %-${recvlen}s | %-${sentlen}s | %-3s | %-${blockslen}s | %-s\n",
+            'id',          'addr',               'subver',        'time',    'ms',     'recv',         'sent',     'dir',   'blocks',     'headers' );
 
-    my $totallen = ($idlen + $addrlen + $subverlen + 5 + 7 + 7 + 3 + $blockslen + $headerslen + (3*8) );
+    my $totallen = ($idlen + $addrlen + $subverlen + $connlen + 5 + $recvlen + $sentlen + 3 + $blockslen + $headerslen + (3*9) );
     print '-' x $totallen . "\n";
 
     my @sorted = $opt{sort} eq 'subver' || $opt{sort} eq 'dir' ?
@@ -158,17 +185,21 @@ while( 1 ){
                                       sort { $data{$b}{$opt{sort}} <=> $data{$a}{$opt{sort}} ||
                                              $data{$b}{$opt{sort}} cmp $data{$a}{$opt{sort}} } keys %data;
 
+    my $line=0;
     for my $addr (@sorted){
-        my $rb = humanify( $data{$addr}{bytesrecv} );
-        my $sb = humanify( $data{$addr}{bytessent} );
+        $line++;
+
+        my $rb = humanify_bytes( $data{$addr}{bytesrecv} );
+        my $sb = humanify_bytes( $data{$addr}{bytessent} );
 
         if( $opt{host} && $opt{host} eq $data{$addr}{id} ){
             printf "\033[47;30m"; # highlight
         }
-        printf( "%-${idlen}s | %-${addrlen}s | %-${subverlen}s | %-5s | %-7s | %-7s | %-3s | %-${blockslen}s | %-s\n",
+        printf( "%-${idlen}s | %-${addrlen}s | %-${subverlen}s | %-${connlen}s | %-5s | %-${recvlen}s | %-${sentlen}s | %-3s | %-${blockslen}s | %-s\n",
                 $data{$addr}{id},
                 $addr,
                 $data{$addr}{subver},
+                $data{$addr}{conntime},
                 $data{$addr}{ms},
                 $rb,
                 $sb,
@@ -179,12 +210,15 @@ while( 1 ){
         if( $opt{host} && $opt{host} eq $data{$addr}{id} ){
             printf "\033[40;37m"; # unhighlight
         }
+
+        last if $opt{lines} && $line == $opt{lines};
     }
 
     exit if $opt{once};
 
 	my $key;
     print "\n",
+          "local height: $height\n",
           "[(q)uit|(s)ort|(i)nterval|(f)ilter|(d)ata|(h)ighlight]:\n";
     for(1..$opt{interval}){
         print $cycle[$cyclepos] unless $opt{nocls}; # would make no sense
@@ -276,6 +310,8 @@ while( 1 ){
             $input = 'bytessent';
         }elsif( $input eq 'recv' ){
             $input = 'bytesrecv';
+        }elsif( $input eq 'time' ){
+            $input = 'conntime';
         }
         if( exists($fields{bitcoin}{$input}) ){
             $opt{sort} = $input;
@@ -342,7 +378,7 @@ sub getkey {
     return $key;
 }
 
-sub humanify {
+sub humanify_bytes {
 	my $bytes = shift;
 
 	my $data;
@@ -357,6 +393,17 @@ sub humanify {
 	}
 		
 	return $data;
+}
+
+sub humanify_time {
+    my $sec = shift;
+
+    return join(':',
+            int( $sec/(24*60*60) ),
+            sprintf( '%02d', ($sec/(60*60))%24 ),
+            sprintf( '%02d', ($sec/60)%60 ),
+            sprintf( '%02d', $sec%60 )
+           );
 }
 
 sub api {
@@ -398,6 +445,7 @@ sub help {
     debug       set debug info
     help        do not print help
     interval    seconds to refresh              [10]
+    lines       number of lines to show
     nocls       do not ever clear screen
     once        display data once and exit
     port        port of node API                [8332]
