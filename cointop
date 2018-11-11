@@ -13,7 +13,7 @@ use JSON::RPC::Client;
 use Term::Cap;
 use Term::ANSIColor;
 
-my $VER = '1.1';
+my $VER = '1.02';
 my %opt = ( host     => '127.0.0.1',
             sort     => 'bytesrecv',
             interval => 10,
@@ -126,6 +126,9 @@ while( 1 ){
         if( $href->{subver} =~ /Bitcoin ABC:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
             my ($ver,$eb) = ($1,$2);
             $href->{subver} = "ABC/$ver:$eb";
+        }elsif( $href->{subver} =~ /Bitcoin SV:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
+            my ($ver,$eb) = ($1,$2);
+            $href->{subver} = "SV/$ver:$eb";
         }elsif( $href->{subver} =~ /BUCash:(\d+\.\d+\.\d+(?:\.\d+)*)\(EB(\d+);\s*AD(\d+)/ ){
             my ($ver,$eb,$ad) = ($1,$2,$3);
             $href->{subver} = "BUC/$ver:$eb:$ad";
