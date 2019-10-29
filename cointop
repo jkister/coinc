@@ -9,11 +9,11 @@ use strict;
 use Socket;
 use Getopt::Long;
 use LWP::UserAgent;
-use JSON::RPC::Client;
+use JSON::RPC::Legacy::Client;
 use Term::Cap;
 use Term::ANSIColor;
 
-my $VER = '1.02';
+my $VER = '1.03';
 my %opt = ( host     => '127.0.0.1',
             sort     => 'bytesrecv',
             interval => 10,
@@ -91,7 +91,7 @@ my $ua     = LWP::UserAgent->new(agent   => $UA,
                                  keep_alive => 1,
                                 );
 my $URI   = "http://$opt{host}:$opt{port}/";
-my $client = JSON::RPC::Client->new();
+my $client = JSON::RPC::Legacy::Client->new();
 $client->ua->credentials(
      "$opt{host}:$opt{port}", 'jsonrpc', $opt{username} => $opt{password}
 );
@@ -103,7 +103,7 @@ my $cyclepos=0;
 while( 1 ){
     my (%data,%ids);
 
-    my $height = api($client, $URI, {method => 'getinfo'})->{blocks};
+    my $height = api($client, $URI, {method => 'getblockchaininfo'})->{blocks};
 
 
     for my $href ( @{api($client, $URI, {method => 'getpeerinfo'})} ){
