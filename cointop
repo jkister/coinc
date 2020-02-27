@@ -126,6 +126,9 @@ while( 1 ){
         if( $href->{subver} =~ /Bitcoin ABC:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
             my ($ver,$eb) = ($1,$2);
             $href->{subver} = "ABC/$ver:$eb";
+        }elsif( $href->{subver} =~ /Bitcoin Cash Node:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
+            my ($ver,$eb) = ($1,$2);
+            $href->{subver} = "BCN/$ver:$eb";
         }elsif( $href->{subver} =~ /Bitcoin SV:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
             my ($ver,$eb) = ($1,$2);
             $href->{subver} = "SV/$ver:$eb";
