@@ -2,7 +2,7 @@
 
 # cointop
 # see data about who's connected to your node (core/abc/unlimited/altcoins too)
-# 2018012201 (c) jeremy kister @ kister.net
+# 2020022801 (c) jeremy kister @ kister.net
 # released under the artistic license v2.
 
 use strict;
@@ -13,7 +13,7 @@ use JSON::RPC::Legacy::Client;
 use Term::Cap;
 use Term::ANSIColor;
 
-my $VER = '1.03';
+my $VER = '1.05';
 my %opt = ( host     => '127.0.0.1',
             sort     => 'bytesrecv',
             interval => 10,
@@ -27,6 +27,7 @@ my $good = GetOptions( \%opt,
             'interval=i',
             'lines=i',
             'nocls',
+            'noabbrv',
             'once',
             'port=i',
             'sort=s',
@@ -123,28 +124,34 @@ while( 1 ){
         }
 
         # abbreviate subver
-        if( $href->{subver} =~ /Bitcoin ABC:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
-            my ($ver,$eb) = ($1,$2);
-            $href->{subver} = "ABC/$ver:$eb";
-        }elsif( $href->{subver} =~ /Bitcoin Cash Node:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
-            my ($ver,$eb) = ($1,$2);
-            $href->{subver} = "BCN/$ver:$eb";
-        }elsif( $href->{subver} =~ /Bitcoin SV:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
-            my ($ver,$eb) = ($1,$2);
-            $href->{subver} = "SV/$ver:$eb";
-        }elsif( $href->{subver} =~ /BUCash:(\d+\.\d+\.\d+(?:\.\d+)*)\(EB(\d+);\s*AD(\d+)/ ){
-            my ($ver,$eb,$ad) = ($1,$2,$3);
-            $href->{subver} = "BUC/$ver:$eb:$ad";
-        }elsif( $href->{subver} =~ /XT:(\d+\.\d+\.\d+[a-zA-Z]*)\(.*EB(\d+)/ ){
-            my ($ver,$eb) = ($1,$2);
-            $href->{subver} = "XT/$ver:$eb";
-        }elsif( $href->{subver} =~ /btcwire:(\d+\.\d+(?:\.\d+)*)\/OpenBazaar:(\d+\.\d+(?:\.\d+)*)/ ){
-            #btcwire:0.5.0/OpenBazaar:0.1.0 
-            my ($bwv,$obv) = ($1,$2);
-            $href->{subver} = "bw/$bwv/ob/$obv";
-        }elsif( $href->{subver} =~ /bitnodes.bitcoinunlimited.info:(\d+\.\d+(?:\.\d+)*)/ ){
-            my $ver = $1;
-            $href->{subver} = "bitnodes.bu:$ver";
+        unless( $opt{noabbrv} ){
+	        if( $href->{subver} =~ /Bitcoin ABC:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
+	            my ($ver,$eb) = ($1,$2);
+	            $href->{subver} = "ABC/$ver:$eb";
+	        }elsif( $href->{subver} =~ /Bitcoin Cash Node:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
+	            my ($ver,$eb) = ($1,$2);
+	            $href->{subver} = "BCHN/$ver:$eb";
+	        }elsif( $href->{subver} =~ /Bitcoin SV:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
+	            my ($ver,$eb) = ($1,$2);
+	            $href->{subver} = "BSV/$ver:$eb";
+	        }elsif( $href->{subver} =~ /BUCash:(\d+\.\d+\.\d+(?:\.\d+)*)\(.*EB(\d+);\s*AD(\d+)/ ){
+	            my ($ver,$eb,$ad) = ($1,$2,$3);
+	            $href->{subver} = "BUC/$ver:$eb:$ad";
+	        }elsif( $href->{subver} =~ /XT:(\d+\.\d+\.\d+[a-zA-Z]*)\(.*EB(\d+)/ ){
+	            my ($ver,$eb) = ($1,$2);
+	            $href->{subver} = "XT/$ver:$eb";
+	        }elsif( $href->{subver} =~ /btcwire:(\d+\.\d+(?:\.\d+)*)\/OpenBazaar:(\d+\.\d+(?:\.\d+)*)/ ){
+	            #btcwire:0.5.0/OpenBazaar:0.1.0 
+	            my ($bwv,$obv) = ($1,$2);
+	            $href->{subver} = "bw/$bwv/ob/$obv";
+	        }elsif( $href->{subver} =~ /bitnodes.bitcoinunlimited.info:(\d+\.\d+(?:\.\d+)*)/ ){
+	            my $ver = $1;
+	            $href->{subver} = "bitnodes.bu:$ver";
+	            my $ver = $1;
+	        }elsif( $href->{subver} =~ /bchd:(\d+\.\d+\.\d+)\(EB(\d+)/ ){
+	            my ($ver,$eb) = ($1,$2);
+	            $href->{subver} = "bchd/$ver:$eb";
+	        }
         }
         for my $field (qw/id addr subver conntime bytesrecv bytessent synced_blocks synced_headers/){
             my $len = length($href->{$field});
