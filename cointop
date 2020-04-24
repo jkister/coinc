@@ -134,7 +134,7 @@ while( 1 ){
 	        }elsif( $href->{subver} =~ /Bitcoin SV:(\d+\.\d+\.\d+)\(EB(\d+(?:\.\d+)?)/ ){
 	            my ($ver,$eb) = ($1,$2);
 	            $href->{subver} = "BSV/$ver:$eb";
-	        }elsif( $href->{subver} =~ /BUCash:(\d+\.\d+\.\d+(?:\.\d+)*)\(.*EB(\d+);\s*AD(\d+)/ ){
+	        }elsif( $href->{subver} =~ /(?:BUCash|BCH Unlimited):(\d+\.\d+\.\d+(?:\.\d+)*)\(.*EB(\d+);\s*AD(\d+)/ ){
 	            my ($ver,$eb,$ad) = ($1,$2,$3);
 	            $href->{subver} = "BUC/$ver:$eb:$ad";
 	        }elsif( $href->{subver} =~ /XT:(\d+\.\d+\.\d+[a-zA-Z]*)\(.*EB(\d+)/ ){
